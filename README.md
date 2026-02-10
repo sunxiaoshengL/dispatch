@@ -1,3 +1,5 @@
+![Uploading image.png…]()
+
 # Floating Console Pro (悬浮控制台)
 
 一个轻量级、现代化的 Windows 桌面悬浮工具，集成了系统监控、下班倒计时以及便捷的系统控制功能。
