@@ -7,8 +7,6 @@ import win32gui
 import win32process
 import win32api
 import win32con
-import requests
-import json
 
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QPushButton,
@@ -21,54 +19,6 @@ from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QIcon, QPixmap, QBrush
 def get_refresh_rate():
     dev = win32api.EnumDisplaySettings(None, win32con.ENUM_CURRENT_SETTINGS)
     return dev.DisplayFrequency
-
-
-class WeatherThread(QThread):
-    """异步获取天气的线程"""
-    weather_updated = pyqtSignal(str, str, str)  # 城市, 今天, 明天
-    
-    def __init__(self, location):
-        super().__init__()
-        self.location = location
-    
-    def run(self):
-        try:
-            # 使用免费的天气API获取实时天气
-            url = f"https://wttr.in/{self.location}?format=j1&lang=zh"
-            response = requests.get(url, timeout=5)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # 获取今天天气
-                current = data.get('current_condition', [{}])[0]
-                today_desc = current.get('lang_zh', [{}])[0].get('value', '未知') if current.get('lang_zh') else '未知'
-                
-                # 获取明天天气
-                weather_list = data.get('weather', [])
-                if len(weather_list) > 1:
-                    tomorrow = weather_list[1]
-                    tomorrow_desc = tomorrow.get('hourly', [{}])[0].get('lang_zh', [{}])[0].get('value', '未知') if tomorrow.get('hourly') else '未知'
-                else:
-                    tomorrow_desc = '未知'
-                
-                self.weather_updated.emit(self.location, today_desc, tomorrow_desc)
-            else:
-                raise Exception(f"API返回错误: {response.status_code}")
-                
-        except Exception as e:
-            print(f"获取天气失败: {e}")
-            # 失败时使用备用方案
-            try:
-                url = f"https://wttr.in/{self.location}?format=%c+%C&lang=zh"
-                response = requests.get(url, timeout=3)
-                if response.status_code == 200:
-                    weather_text = response.text.strip()
-                    self.weather_updated.emit(self.location, weather_text, "查询中")
-                else:
-                    self.weather_updated.emit(self.location, "获取失败", "")
-            except:
-                self.weather_updated.emit(self.location, "获取失败", "")
 
 
 class SlideButton(QWidget):
@@ -166,11 +116,6 @@ class FloatingConsole(QWidget):
         super().__init__()
         self.click_count = {"lock": 0, "shutdown": 0}
         self.last_click_time = 0
-        self.weather_location = "天气"
-        self.weather_data = {"today": "--", "tomorrow": "--"}
-        self.weather_click_count = 0
-        self.weather_last_click = 0
-        self.weather_last_update = 0  # 记录上次天气更新时间
         self.offwork_time = None  # 下班时间 (小时, 分钟)
         self.offwork_click_count = 0
         self.offwork_last_click = 0
@@ -210,30 +155,6 @@ class FloatingConsole(QWidget):
         self.mem = label("内存:0%")
         self.refresh = label("刷新率:-- Hz")
         
-        # 天气标签容器
-        weather_container = QWidget()
-        weather_container.setStyleSheet("background:transparent;")
-        weather_layout = QVBoxLayout(weather_container)
-        weather_layout.setContentsMargins(0, 0, 0, 0)
-        weather_layout.setSpacing(0)
-        
-        self.weather = label("天气:今天/明天", clickable=True)
-        self.weather.mousePressEvent = self.weather_clicked
-        
-        self.weather_refresh = QLabel("刷新")
-        self.weather_refresh.setFont(QFont("Microsoft YaHei UI", 8))
-        self.weather_refresh.setStyleSheet(
-            "color:#64B5F6;"
-            "background:transparent;"
-            "padding:2px 5px;"
-        )
-        self.weather_refresh.setCursor(Qt.PointingHandCursor)
-        self.weather_refresh.mousePressEvent = self.refresh_weather_clicked
-        self.weather_refresh.hide()  # 默认隐藏
-        
-        weather_layout.addWidget(self.weather)
-        weather_layout.addWidget(self.weather_refresh)
-        
         self.offwork = label("下班剩余时间", clickable=True)
         self.offwork.mousePressEvent = self.offwork_clicked
 
@@ -248,7 +169,7 @@ class FloatingConsole(QWidget):
 
         for w in [
             self.cpu, self.mem, self.refresh, 
-            weather_container, self.offwork,
+            self.offwork,
             self.lock_slide, self.shutdown_slide
         ]:
             layout.addWidget(w)
@@ -373,12 +294,6 @@ class FloatingConsole(QWidget):
         # 更新下班倒计时
         self.update_offwork_time()
         
-        # 每30分钟更新一次天气
-        now = time.time()
-        if self.weather_location != "天气" and (now - self.weather_last_update >= 1800):
-            self.weather_last_update = now
-            self.get_weather()
-
         # 根据CPU使用率改变边框颜色
         if cpu < 60:
             self.border_color = QColor(100, 100, 110, 150)
@@ -397,26 +312,6 @@ class FloatingConsole(QWidget):
         """执行关机"""
         subprocess.Popen("shutdown /s /t 0", shell=True)
 
-    def weather_clicked(self, event):
-        now = time.time()
-        if now - self.weather_last_click > 2:
-            self.weather_click_count = 0
-
-        self.weather_last_click = now
-        self.weather_click_count += 1
-
-        # 更新显示
-        if self.weather_location == "天气":
-            self.weather.setText(f"天气:今天/明天 ({self.weather_click_count}/5)")
-        else:
-            today = self.weather_data.get("today", "--")
-            tomorrow = self.weather_data.get("tomorrow", "--")
-            self.weather.setText(f"{self.weather_location}:{today}/{tomorrow} ({self.weather_click_count}/5)")
-
-        if self.weather_click_count >= 5:
-            self.weather_click_count = 0
-            self.set_weather_location()
-
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -434,15 +329,7 @@ class FloatingConsole(QWidget):
     def leaveEvent(self, event):
         self.click_count["lock"] = 0
         self.click_count["shutdown"] = 0
-        self.weather_click_count = 0
         self.offwork_click_count = 0
-        # 恢复天气显示
-        if self.weather_location == "天气":
-            self.weather.setText("天气:今天/明天")
-        else:
-            today = self.weather_data.get("today", "--")
-            tomorrow = self.weather_data.get("tomorrow", "--")
-            self.weather.setText(f"{self.weather_location}:{today}/{tomorrow}")
         # 恢复下班时间显示
         self.update_offwork_time()
 
@@ -456,39 +343,6 @@ class FloatingConsole(QWidget):
             QSystemTrayIcon.Information,
             2000
         )
-
-    def set_weather_location(self):
-        from PyQt5.QtWidgets import QInputDialog, QLineEdit
-        from PyQt5.QtCore import Qt
-        dialog = QInputDialog(self)
-        dialog.setWindowTitle("设置天气位置")
-        dialog.setLabelText("请输入城市名称（如:北京、上海）:")
-        dialog.setTextValue(self.weather_location if self.weather_location != "天气" else "")
-        dialog.setOkButtonText("确定")
-        dialog.setCancelButtonText("取消")
-        dialog.setInputMode(QInputDialog.TextInput)
-        
-        # 获取输入框并设置焦点
-        line_edit = dialog.findChild(QLineEdit)
-        if line_edit:
-            line_edit.setFocus()
-            # 确保回车键可以触发确定按钮
-            line_edit.returnPressed.connect(dialog.accept)
-        
-        if dialog.exec_() == QInputDialog.Accepted:
-            location = dialog.textValue()
-            if location:
-                self.weather_location = location
-                self.weather_last_update = 0  # 重置更新时间，立即获取天气
-                self.get_weather()
-        else:
-            # 取消输入，恢复显示
-            if self.weather_location == "天气":
-                self.weather.setText("天气:今天/明天")
-            else:
-                today = self.weather_data.get("today", "--")
-                tomorrow = self.weather_data.get("tomorrow", "--")
-                self.weather.setText(f"{self.weather_location}:{today}/{tomorrow}")
 
     def offwork_clicked(self, event):
         now = time.time()
@@ -581,44 +435,6 @@ class FloatingConsole(QWidget):
             self.offwork.setText(f"下班:{hours}时{minutes}分{seconds}秒 ({self.offwork_click_count}/5)")
         else:
             self.offwork.setText(f"下班:{hours}时{minutes}分{seconds}秒")
-
-    def get_weather(self):
-        """异步获取天气"""
-        if hasattr(self, 'weather_thread') and self.weather_thread.isRunning():
-            return  # 如果已经在获取，不重复请求
-        
-        # 重置刷新按钮文本
-        self.weather_refresh.setText("刷新")
-        
-        self.weather_thread = WeatherThread(self.weather_location)
-        self.weather_thread.weather_updated.connect(self.on_weather_updated)
-        self.weather_thread.start()
-    
-    def on_weather_updated(self, location, today, tomorrow):
-        """天气数据获取完成的回调"""
-        self.weather_data["today"] = today
-        self.weather_data["tomorrow"] = tomorrow
-        
-        # 检查是否获取失败
-        if today == "获取失败" or today == "未知":
-            if tomorrow:
-                self.weather.setText(f"{location}:{today}/{tomorrow}")
-            else:
-                self.weather.setText(f"{location}:{today}")
-            self.weather_refresh.show()  # 显示刷新按钮
-        else:
-            if tomorrow:
-                self.weather.setText(f"{location}:{today}/{tomorrow}")
-            else:
-                self.weather.setText(f"{location}:{today}")
-            self.weather_refresh.hide()  # 隐藏刷新按钮
-    
-    def refresh_weather_clicked(self, event):
-        """点击刷新按钮时重新获取天气"""
-        if self.weather_location != "天气":
-            self.weather_refresh.setText("刷新中...")
-            self.weather_last_update = 0
-            self.get_weather()
 
 
 if __name__ == "__main__":
