@@ -44,7 +44,7 @@ class SlideButton(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         
         # 左边距
-        margin_left = 10
+        margin_left = 3
         
         # 绘制背景
         painter.setBrush(QBrush(self.bg_color))
@@ -161,11 +161,9 @@ class FloatingConsole(QWidget):
         # 创建滑动按钮
         self.lock_slide = SlideButton("锁屏", "🔒", "#888888")  # 灰色
         self.lock_slide.triggered.connect(self.do_lock)
-        self.lock_slide.setStyleSheet("margin-left:10px;")
         
         self.shutdown_slide = SlideButton("关机", "⏻", "#888888")  # 灰色
         self.shutdown_slide.triggered.connect(self.do_shutdown)
-        self.shutdown_slide.setStyleSheet("margin-left:10px;")
 
         for w in [
             self.cpu, self.mem, self.refresh, 
